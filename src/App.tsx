@@ -12,12 +12,15 @@ import { AreaView } from './views/AreaView'
 import { SearchView } from './views/SearchView'
 import { SettingsView } from './views/SettingsView'
 import { inDesktopApp } from './lib/storage'
+import { UpdatesProvider } from './components/Updates'
 
 export default function App() {
   return (
     <StoreProvider>
       <UIProvider>
-        <Shell />
+        <UpdatesProvider>
+          <Shell />
+        </UpdatesProvider>
       </UIProvider>
     </StoreProvider>
   )

@@ -4,6 +4,9 @@ import { inDesktopApp } from '../lib/storage'
 import { backupName, openTextFile, parseBackup, saveTextFile, toBackup, toCsv } from '../lib/backup'
 import type { Settings, Theme } from '../types'
 import { Icon } from '../components/Icon'
+import { EmailSettingsPanel } from '../components/EmailSettingsPanel'
+import { PeopleSettings } from '../components/PeopleSettings'
+import { UpdateSettings } from '../components/Updates'
 
 const AREA_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#db2777', '#ca8a04', '#64748b']
 
@@ -82,12 +85,27 @@ export function SettingsView() {
         </p>
       </Group>
 
+      <Group title="Email reminders">
+        <EmailSettingsPanel />
+      </Group>
+
+      <Group title="People">
+        <PeopleSettings />
+      </Group>
+
       <Group title="Areas">
         <div className="space-y-1.5">
           {data.areas.map((a) => (
             <div key={a.id} className="flex items-center gap-2">
               <ColorPicker color={a.color} onChange={(color) => saveArea({ ...a, color })} />
               <input className="field" defaultValue={a.name} onBlur={(e) => e.target.value.trim() && e.target.value !== a.name && saveArea({ ...a, name: e.target.value.trim() })} />
+              <button
+                className={`btn ${a.hidden ? 'text-muted' : 'text-accent'}`}
+                title={a.hidden ? 'Hidden from the left panel. Click to show it.' : 'Shown in the left panel. Click to hide it.'}
+                onClick={() => saveArea({ ...a, hidden: !a.hidden })}
+              >
+                <Icon name={a.hidden ? 'eyeOff' : 'eye'} size={15} />
+              </button>
               <button
                 className="btn text-muted hover:text-danger"
                 title="Delete area"
@@ -100,11 +118,13 @@ export function SettingsView() {
         </div>
         <button
           className="btn mt-2 text-accent"
-          onClick={() => saveArea({ id: uid(), name: 'New area', color: AREA_COLORS[data.areas.length % AREA_COLORS.length], sort: data.areas.length })}
+          onClick={() => saveArea({ id: uid(), name: 'New area', color: AREA_COLORS[data.areas.length % AREA_COLORS.length], sort: data.areas.length, hidden: false })}
         >
           <Icon name="plus" size={14} /> Add area
         </button>
-        <p className="mt-1 text-xs text-muted">Tip: type #areaname in quick add, e.g. #youtube.</p>
+        <p className="mt-1 text-xs text-muted">
+          The eye icon picks which areas show in the left panel. Hidden areas still work everywhere else. Tip: type #areaname in quick add, e.g. #youtube.
+        </p>
       </Group>
 
       <Group title="Your data">
@@ -117,6 +137,10 @@ export function SettingsView() {
           <button className="btn border border-line" onClick={() => doExport('csv')}>Export tasks (.csv)</button>
         </div>
         {message && <p className="mt-2 text-sm">{message}</p>}
+      </Group>
+
+      <Group title="App version">
+        <UpdateSettings />
       </Group>
 
       <Group title="Keyboard shortcuts">

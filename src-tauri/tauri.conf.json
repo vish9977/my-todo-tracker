@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MyTodoTracker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.vikas.mytodotracker",
   "build": {
     "frontendDist": "../dist",
@@ -44,6 +44,18 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "shortDescription": "Offline goals and tasks tracker"
+    "shortDescription": "Offline goals and tasks tracker",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3NzQ4MEQwMDI0QUIwM0QKUldROXNFb0MwSUIwdDdGOGUrUEU4clVTdXJwREJqWUlCc1VJVTBDQnAyR0NzVEZNdzhyZUZqOEEK",
+      "endpoints": [
+        "https://github.com/vish9977/my-todo-tracker/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

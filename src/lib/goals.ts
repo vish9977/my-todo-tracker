@@ -1,11 +1,24 @@
 import type { AppData, Goal, Task } from '../types'
 
-/** Tasks that count toward a goal: its own tasks plus tasks of its week goals. */
-export function tasksForGoal(goal: Goal, data: AppData): Task[] {
+/** The goal plus every goal under it, at any depth. */
+export function goalAndDescendants(goal: Goal, data: AppData): Set<string> {
   const ids = new Set([goal.id])
-  if (goal.level === 'month') {
-    for (const g of data.goals) if (g.parentId === goal.id) ids.add(g.id)
+  let added = true
+  while (added) {
+    added = false
+    for (const g of data.goals) {
+      if (g.parentId && ids.has(g.parentId) && !ids.has(g.id)) {
+        ids.add(g.id)
+        added = true
+      }
+    }
   }
+  return ids
+}
+
+/** Tasks that count toward a goal: its own tasks plus tasks of all goals under it. */
+export function tasksForGoal(goal: Goal, data: AppData): Task[] {
+  const ids = goalAndDescendants(goal, data)
   return data.tasks.filter((t) => t.goalId && ids.has(t.goalId))
 }
 

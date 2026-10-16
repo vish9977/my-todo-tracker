@@ -4,7 +4,7 @@ import { useUI } from '../ui'
 import { compareTasks } from '../lib/goals'
 import { Section, TaskList } from '../components/TaskItem'
 import { Icon } from '../components/Icon'
-import { prettyMonth, prettyWeek } from '../lib/dates'
+import { LEVEL_NAME, goalLabel } from '../lib/periods'
 
 type Filter = 'open' | 'all' | 'done'
 
@@ -15,6 +15,7 @@ export function SearchView() {
   const [filter, setFilter] = useState<Filter>('open')
   const [areaId, setAreaId] = useState('')
   const [priority, setPriority] = useState('')
+  const [assignee, setAssignee] = useState('')
 
   const needle = q.trim().toLowerCase()
   const matches = (s: string) => s.toLowerCase().includes(needle)
@@ -22,10 +23,11 @@ export function SearchView() {
     .filter((t) => (filter === 'all' ? true : filter === 'done' ? t.done : !t.done))
     .filter((t) => !areaId || t.areaId === areaId)
     .filter((t) => !priority || t.priority === Number(priority))
+    .filter((t) => !assignee || (assignee === 'me' ? !t.assigneeId : t.assigneeId === assignee))
     .filter((t) => !needle || matches(t.title) || matches(t.notes) || t.subtasks.some((s) => matches(s.title)))
     .sort(compareTasks)
   const goals = needle ? data.goals.filter((g) => matches(g.title) || matches(g.notes)) : []
-  const active = needle || areaId || priority
+  const active = needle || areaId || priority || assignee
 
   return (
     <div>
@@ -59,6 +61,13 @@ export function SearchView() {
           <option value="3">P3</option>
           <option value="4">P4</option>
         </select>
+        {data.settings.people.length > 0 && (
+          <select className="field w-auto" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+            <option value="">Anyone</option>
+            <option value="me">Assigned to me</option>
+            {data.settings.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
       </div>
 
       {goals.length > 0 && (
@@ -67,7 +76,7 @@ export function SearchView() {
             <button key={g.id} onClick={() => editGoal(g)} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-hover">
               <Icon name="target" size={14} className="text-muted" />
               <span className="flex-1">{g.title}</span>
-              <span className="text-xs text-muted">{g.level === 'month' ? prettyMonth(g.period) : prettyWeek(g.period)}</span>
+              <span className="text-xs text-muted">{LEVEL_NAME[g.level]} · {goalLabel(g)}</span>
             </button>
           ))}
         </Section>

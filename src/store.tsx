@@ -1,11 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AppData, Area, Goal, Settings, Task } from './types'
+import type { AppData, Area, Goal, Settings, Task, TaskReminder } from './types'
+import { addDays, differenceInCalendarDays } from 'date-fns'
 import { storage } from './lib/storage'
 import { nextOccurrence } from './lib/recurrence'
 import { ensureNotificationPermission, syncReminders } from './lib/reminders'
-import { todayStr } from './lib/dates'
+import { fromDay, toDay, todayStr } from './lib/dates'
 
 export const uid = () => crypto.randomUUID()
+
+const defaultReminders = (s: Settings): TaskReminder[] =>
+  s.defaultRemindBefore === null ? [] : [{ id: uid(), kind: 'before', minutes: s.defaultRemindBefore }]
 const nowIso = () => new Date().toISOString()
 
 export type NewTask = Partial<Omit<Task, 'id' | 'createdAt'>> & { title: string }
@@ -127,8 +131,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           recurrence: null,
           subtasks: [],
           sort: Date.now(),
+          nagMinutes: null,
+          emailReminder: null,
+          assigneeId: null,
+          assigneeEmailedAt: null,
+          remindAssignee: false,
           ...input,
-          remindBefore: input.remindBefore !== undefined ? input.remindBefore : input.time ? s.defaultRemindBefore : null,
+          reminders: input.reminders ?? (input.time ? defaultReminders(s) : []),
           id: uid(),
           createdAt: nowIso(),
         }
@@ -140,10 +149,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const cur = findTask(id)
         if (!cur) return
         const next = { ...cur, ...patch }
-        // Setting a time turns on the default reminder; clearing it turns the reminder off.
-        if ('time' in patch && patch.time && !cur.time && !('remindBefore' in patch))
-          next.remindBefore = dataRef.current!.settings.defaultRemindBefore
-        if ('time' in patch && !patch.time) next.remindBefore = null
+        // Setting a time adds the default reminder; clearing it drops reminders that need a time.
+        if ('time' in patch && patch.time && !cur.time && !('reminders' in patch) && cur.reminders.length === 0)
+          next.reminders = defaultReminders(dataRef.current!.settings)
+        if ('time' in patch && !patch.time) next.reminders = next.reminders.filter((r) => r.kind === 'at')
         putTask(next)
       },
 
@@ -158,10 +167,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         putTask(doneTask)
         let created: Task | null = null
         if (cur.recurrence && cur.date) {
+          const nextDate = nextOccurrence(cur.date, cur.recurrence)
+          const shift = differenceInCalendarDays(fromDay(nextDate), fromDay(cur.date))
           created = {
             ...cur,
             id: uid(),
-            date: nextOccurrence(cur.date, cur.recurrence),
+            date: nextDate,
+            // Exact-time reminders move along with the task.
+            reminders: cur.reminders.map((r) =>
+              r.kind === 'at' ? { ...r, id: uid(), at: `${toDay(addDays(fromDay(r.at.slice(0, 10)), shift))}${r.at.slice(10)}` } : r,
+            ),
             subtasks: cur.subtasks.map((s) => ({ ...s, done: false })),
             createdAt: nowIso(),
           }
@@ -191,6 +206,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addGoal: (input) => {
         const goal: Goal = {
           notes: '',
+          endDate: null,
           parentId: null,
           areaId: null,
           archived: false,

@@ -3,20 +3,11 @@ import { useStore, uid } from '../store'
 import { useUI } from '../ui'
 import type { Priority, Recurrence, RecurrenceType, Task } from '../types'
 import { Icon } from './Icon'
-import { prettyMonth, prettyWeek, todayStr } from '../lib/dates'
-import { format, parseISO } from 'date-fns'
-
-const REMIND_OPTIONS: { label: string; value: number | null }[] = [
-  { label: 'No reminder', value: null },
-  { label: 'At time of task', value: 0 },
-  { label: '5 minutes before', value: 5 },
-  { label: '10 minutes before', value: 10 },
-  { label: '15 minutes before', value: 15 },
-  { label: '30 minutes before', value: 30 },
-  { label: '1 hour before', value: 60 },
-  { label: '2 hours before', value: 120 },
-  { label: '1 day before', value: 1440 },
-]
+import { ReminderEditor } from './ReminderEditor'
+import { AssigneePicker } from './AssigneePicker'
+import { fromDay, toDay, todayStr } from '../lib/dates'
+import { LEVELS, LEVEL_NAME, goalLabel, goalRange } from '../lib/periods'
+import { addDays, format, parseISO } from 'date-fns'
 
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
@@ -76,20 +67,7 @@ export function TaskDetail() {
           </label>
         </div>
 
-        <label className="block">
-          <span className="label">Reminder</span>
-          <select
-            className="field"
-            disabled={!task.time}
-            value={task.remindBefore ?? ''}
-            onChange={(e) => set({ remindBefore: e.target.value === '' ? null : Number(e.target.value) })}
-          >
-            {REMIND_OPTIONS.map((o) => (
-              <option key={o.label} value={o.value ?? ''}>{o.label}</option>
-            ))}
-          </select>
-          {!task.time && <span className="mt-1 block text-xs text-muted">Set a time to get a reminder.</span>}
-        </label>
+        <ReminderEditor task={task} onChange={set} />
 
         <RepeatPicker task={task} onChange={(recurrence) => set({ recurrence })} />
 
@@ -118,6 +96,8 @@ export function TaskDetail() {
           const goal = data.goals.find((g) => g.id === goalId)
           set({ goalId, ...(goal?.areaId && !task.areaId ? { areaId: goal.areaId } : {}) })
         }} />
+
+        <AssigneePicker task={task} onChange={set} />
 
         <Subtasks task={task} onChange={(subtasks) => set({ subtasks })} />
 
@@ -201,30 +181,26 @@ function RepeatPicker({ task, onChange }: { task: Task; onChange: (r: Recurrence
 }
 
 function GoalPicker({ task, onChange }: { task: Task; onChange: (goalId: string | null) => void }) {
-  const { data } = useStore()
-  const months = data.goals.filter((g) => g.level === 'month' && (!g.archived || g.id === task.goalId))
-  const weeks = data.goals.filter((g) => g.level === 'week' && (!g.archived || g.id === task.goalId))
-  months.sort((a, b) => b.period.localeCompare(a.period))
-  weeks.sort((a, b) => b.period.localeCompare(a.period))
+  const { data, today } = useStore()
+  // Goals still running (or ended within the last month), plus whatever the task is already linked to.
+  const recent = toDay(addDays(fromDay(today), -31))
+  const goals = data.goals.filter((g) => g.id === task.goalId || (!g.archived && goalRange(g).end >= recent))
   return (
     <label className="block">
       <span className="label">Goal</span>
       <select className="field" value={task.goalId ?? ''} onChange={(e) => onChange(e.target.value || null)}>
         <option value="">No goal</option>
-        {months.length > 0 && (
-          <optgroup label="Monthly goals">
-            {months.map((g) => (
-              <option key={g.id} value={g.id}>{g.title} · {prettyMonth(g.period)}</option>
-            ))}
-          </optgroup>
-        )}
-        {weeks.length > 0 && (
-          <optgroup label="Weekly goals">
-            {weeks.map((g) => (
-              <option key={g.id} value={g.id}>{g.title} · {prettyWeek(g.period)}</option>
-            ))}
-          </optgroup>
-        )}
+        {LEVELS.map((level) => {
+          const group = goals.filter((g) => g.level === level).sort((a, b) => a.period.localeCompare(b.period))
+          if (group.length === 0) return null
+          return (
+            <optgroup key={level} label={`${LEVEL_NAME[level]} goals`}>
+              {group.map((g) => (
+                <option key={g.id} value={g.id}>{g.title} · {goalLabel(g)}</option>
+              ))}
+            </optgroup>
+          )
+        })}
       </select>
     </label>
   )

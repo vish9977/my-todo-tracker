@@ -16,6 +16,7 @@ export function TaskItem({ task, showDate = true }: { task: Task; showDate?: boo
   const { selectedTaskId, selectTask } = useUI()
   const area = task.areaId ? data.areas.find((a) => a.id === task.areaId) : null
   const goal = task.goalId ? data.goals.find((g) => g.id === task.goalId) : null
+  const assignee = task.assigneeId ? data.settings.people.find((p) => p.id === task.assigneeId) : null
   const overdue = !task.done && task.date && task.date < today
   const subDone = task.subtasks.filter((s) => s.done).length
   const selected = selectedTaskId === task.id
@@ -49,10 +50,11 @@ export function TaskItem({ task, showDate = true }: { task: Task; showDate?: boo
           )}
           {task.time && (
             <span className="inline-flex items-center gap-1">
-              {task.remindBefore !== null && <Icon name="bell" size={11} />}
+              {task.reminders.length > 0 && <Icon name="bell" size={11} />}
               {prettyTime(task.time)}
             </span>
           )}
+          {!task.time && task.reminders.length > 0 && <Icon name="bell" size={11} />}
           {task.recurrence && <Icon name="repeat" size={12} />}
           {task.subtasks.length > 0 && (
             <span>
@@ -60,6 +62,12 @@ export function TaskItem({ task, showDate = true }: { task: Task; showDate?: boo
             </span>
           )}
           {task.notes && <Icon name="list" size={12} />}
+          {assignee && (
+            <span className="inline-flex items-center gap-1 text-accent">
+              <Icon name="user" size={11} />
+              {assignee.name}
+            </span>
+          )}
           {goal && (
             <span className="inline-flex max-w-48 items-center gap-1 truncate">
               <Icon name="target" size={11} />

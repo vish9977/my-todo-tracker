@@ -1,0 +1,58 @@
+name: Release
+
+# Publishes a GitHub Release (installer + latest.json for in-app updates)
+# whenever main has a version that hasn't been released yet.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check whether this version is already released
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.exists == 'false'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.version.outputs.exists == 'false'
+      - uses: swatinem/rust-cache@v2
+        if: steps.version.outputs.exists == 'false'
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+        if: steps.version.outputs.exists == 'false'
+      - uses: tauri-apps/tauri-action@v0
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        with:
+          tagName: v__VERSION__
+          releaseName: MyTodoTracker v__VERSION__
+          releaseBody: See the changes in this version below. Install it from inside the app (Settings → Check for updates), or download the setup file.
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
