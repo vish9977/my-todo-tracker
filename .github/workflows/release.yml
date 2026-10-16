@@ -41,11 +41,25 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
         if: steps.version.outputs.exists == 'false'
+      - name: Clean up the signing key
+        # A pasted secret can pick up spaces, line breaks or a second copy of the key.
+        # Keep only the first complete key, and check it before the long build.
+        if: steps.version.outputs.exists == 'false'
+        shell: bash
+        env:
+          RAW_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          KEY=$(printf '%s' "$RAW_KEY" | tr -d ' \r\n\t' | grep -oE '^[A-Za-z0-9+/]+={0,2}' || true)
+          if ! printf '%s' "$KEY" | base64 -d 2>/dev/null | grep -q 'untrusted comment'; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is missing or is not a valid key. Paste the key file's text into it again."
+            exit 1
+          fi
+          echo "::add-mask::$KEY"
+          echo "TAURI_SIGNING_PRIVATE_KEY=$KEY" >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@v0
         if: steps.version.outputs.exists == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: v__VERSION__
