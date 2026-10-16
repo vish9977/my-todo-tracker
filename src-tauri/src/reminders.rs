@@ -10,6 +10,8 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::email::{self, EmailConfig, OutgoingEmail, Outbox};
+
 /// Reminders this far in the past are still shown (e.g. the PC woke from sleep).
 const GRACE_MS: i64 = 10 * 60 * 1000;
 const TICK: Duration = Duration::from_secs(15);
@@ -22,17 +24,26 @@ pub struct Reminder {
     pub title: String,
     pub body: String,
     pub at_ms: i64,
+    /// Also send this reminder by email.
+    #[serde(default)]
+    pub email: bool,
+    /// Other people to email this reminder to (e.g. the person a task is assigned to).
+    #[serde(default)]
+    pub also_email: Vec<String>,
 }
 
 #[derive(Default)]
 pub struct ReminderState {
     pending: Mutex<Vec<Reminder>>,
     fired: Mutex<HashSet<String>>,
+    email: Mutex<Option<EmailConfig>>,
+    outbox: Outbox,
 }
 
 #[tauri::command]
-pub fn sync_reminders(state: State<'_, ReminderState>, reminders: Vec<Reminder>) {
+pub fn sync_reminders(state: State<'_, ReminderState>, reminders: Vec<Reminder>, email: Option<EmailConfig>) {
     *state.pending.lock().unwrap() = reminders;
+    *state.email.lock().unwrap() = email;
 }
 
 fn now_ms() -> i64 {
@@ -55,16 +66,41 @@ fn take_due(state: &ReminderState, now: i64) -> Vec<Reminder> {
 }
 
 pub fn start(app: AppHandle) {
+    let notify_app = app.clone();
     std::thread::spawn(move || loop {
-        let due = take_due(&app.state::<ReminderState>(), now_ms());
+        let state = notify_app.state::<ReminderState>();
+        let now = now_ms();
+        let due = take_due(&state, now);
+        let emailing = state.email.lock().unwrap().is_some();
         for r in due {
-            let _ = app
+            let _ = notify_app
                 .notification()
                 .builder()
                 .title(&r.title)
                 .body(&r.body)
                 .show();
+            if emailing {
+                let own = r.email.then_some(None);
+                let others = r.also_email.iter().map(|a| Some(a.clone()));
+                for to in own.into_iter().chain(others) {
+                    state.outbox.queue.lock().unwrap().push(OutgoingEmail {
+                        to,
+                        subject: format!("Reminder: {}", r.title),
+                        body: format!("{}\n\n{}\n\nSent by MyTodoTracker", r.title, r.body),
+                        due_ms: r.at_ms,
+                        next_try_ms: now,
+                    });
+                }
+            }
         }
+        std::thread::sleep(TICK);
+    });
+
+    // Emails go out on their own thread so a slow or offline mail server never delays notifications.
+    std::thread::spawn(move || loop {
+        let state = app.state::<ReminderState>();
+        let config = state.email.lock().unwrap().clone();
+        email::flush(&state.outbox, config.as_ref(), now_ms());
         std::thread::sleep(TICK);
     });
 }
@@ -74,7 +110,7 @@ mod tests {
     use super::*;
 
     fn reminder(key: &str, at_ms: i64) -> Reminder {
-        Reminder { key: key.into(), title: "t".into(), body: "b".into(), at_ms }
+        Reminder { key: key.into(), title: "t".into(), body: "b".into(), at_ms, email: false, also_email: vec![] }
     }
 
     #[test]

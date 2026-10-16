@@ -1,6 +1,7 @@
 import { isTauri } from '@tauri-apps/api/core'
 import type Database from '@tauri-apps/plugin-sql'
 import { DEFAULT_SETTINGS, type AppData, type Area, type Goal, type Settings, type Task } from '../types'
+import { normalizeData, normalizeSettings } from './normalize'
 
 /**
  * Persistence. Inside the desktop app everything goes to a local SQLite file
@@ -20,12 +21,12 @@ export interface Storage {
 }
 
 export const DEFAULT_AREAS: Area[] = [
-  { id: 'area-websites', name: 'Websites', color: '#2563eb', sort: 0 },
-  { id: 'area-youtube', name: 'YouTube', color: '#dc2626', sort: 1 },
-  { id: 'area-blogging', name: 'Blogging', color: '#16a34a', sort: 2 },
-  { id: 'area-health', name: 'Health', color: '#db2777', sort: 3 },
-  { id: 'area-home', name: 'Home', color: '#ca8a04', sort: 4 },
-  { id: 'area-personal', name: 'Personal', color: '#9333ea', sort: 5 },
+  { id: 'area-websites', name: 'Websites', color: '#2563eb', sort: 0, hidden: false },
+  { id: 'area-youtube', name: 'YouTube', color: '#dc2626', sort: 1, hidden: false },
+  { id: 'area-blogging', name: 'Blogging', color: '#16a34a', sort: 2, hidden: false },
+  { id: 'area-health', name: 'Health', color: '#db2777', sort: 3, hidden: false },
+  { id: 'area-home', name: 'Home', color: '#ca8a04', sort: 4, hidden: false },
+  { id: 'area-personal', name: 'Personal', color: '#9333ea', sort: 5, hidden: false },
 ]
 
 const emptyData = (): AppData => ({
@@ -39,13 +40,14 @@ const emptyData = (): AppData => ({
 
 interface TaskRow {
   id: string; title: string; notes: string; goal_id: string | null; area_id: string | null
-  date: string | null; time: string | null; remind_before: number | null; priority: number
+  date: string | null; time: string | null; priority: number
   done: number; done_at: string | null; recurrence: string | null; subtasks: string
-  sort: number; created_at: string
+  sort: number; created_at: string; reminders: string; nag_minutes: number | null; email_reminder: number | null
+  assignee_id: string | null; assignee_emailed_at: string | null; remind_assignee: number
 }
 interface GoalRow {
   id: string; title: string; notes: string; level: string; period: string
-  parent_id: string | null; area_id: string | null; archived: number; created_at: string
+  parent_id: string | null; area_id: string | null; archived: number; created_at: string; end_date: string | null
 }
 
 const rowToTask = (r: TaskRow): Task => ({
@@ -56,7 +58,12 @@ const rowToTask = (r: TaskRow): Task => ({
   areaId: r.area_id,
   date: r.date,
   time: r.time,
-  remindBefore: r.remind_before,
+  reminders: JSON.parse(r.reminders || '[]'),
+  nagMinutes: r.nag_minutes,
+  emailReminder: r.email_reminder === null ? null : !!r.email_reminder,
+  assigneeId: r.assignee_id,
+  assigneeEmailedAt: r.assignee_emailed_at,
+  remindAssignee: !!r.remind_assignee,
   priority: r.priority as Task['priority'],
   done: !!r.done,
   doneAt: r.done_at,
@@ -72,6 +79,7 @@ const rowToGoal = (r: GoalRow): Goal => ({
   notes: r.notes,
   level: r.level as Goal['level'],
   period: r.period,
+  endDate: r.end_date,
   parentId: r.parent_id,
   areaId: r.area_id,
   archived: !!r.archived,
@@ -87,7 +95,7 @@ class SqliteStorage implements Storage {
   async load(): Promise<AppData> {
     const db = await this.db
     const [areas, goals, tasks, settingsRows] = await Promise.all([
-      db.select<Area[]>('SELECT id, name, color, sort FROM areas ORDER BY sort'),
+      db.select<(Omit<Area, 'hidden'> & { hidden: number })[]>('SELECT id, name, color, sort, hidden FROM areas ORDER BY sort'),
       db.select<GoalRow[]>('SELECT * FROM goals'),
       db.select<TaskRow[]>('SELECT * FROM tasks'),
       db.select<{ key: string; value: string }[]>('SELECT key, value FROM settings'),
@@ -95,10 +103,10 @@ class SqliteStorage implements Storage {
     const stored = settingsRows.find((r) => r.key === 'settings')
     const firstRun = !stored
     const data: AppData = {
-      areas,
+      areas: areas.map((a) => ({ ...a, hidden: !!a.hidden })),
       goals: goals.map(rowToGoal),
       tasks: tasks.map(rowToTask),
-      settings: { ...DEFAULT_SETTINGS, ...(stored ? JSON.parse(stored.value) : {}) },
+      settings: normalizeSettings(stored ? JSON.parse(stored.value) : undefined),
     }
     if (firstRun) {
       for (const a of DEFAULT_AREAS) await this.saveArea(a)
@@ -111,9 +119,9 @@ class SqliteStorage implements Storage {
   async saveArea(a: Area) {
     const db = await this.db
     await db.execute(
-      `INSERT INTO areas (id, name, color, sort) VALUES ($1, $2, $3, $4)
-       ON CONFLICT(id) DO UPDATE SET name = $2, color = $3, sort = $4`,
-      [a.id, a.name, a.color, a.sort],
+      `INSERT INTO areas (id, name, color, sort, hidden) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT(id) DO UPDATE SET name = $2, color = $3, sort = $4, hidden = $5`,
+      [a.id, a.name, a.color, a.sort, a.hidden ? 1 : 0],
     )
   }
 
@@ -127,11 +135,11 @@ class SqliteStorage implements Storage {
   async saveGoal(g: Goal) {
     const db = await this.db
     await db.execute(
-      `INSERT INTO goals (id, title, notes, level, period, parent_id, area_id, archived, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO goals (id, title, notes, level, period, parent_id, area_id, archived, created_at, end_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT(id) DO UPDATE SET title = $2, notes = $3, level = $4, period = $5,
-         parent_id = $6, area_id = $7, archived = $8`,
-      [g.id, g.title, g.notes, g.level, g.period, g.parentId, g.areaId, g.archived ? 1 : 0, g.createdAt],
+         parent_id = $6, area_id = $7, archived = $8, end_date = $10`,
+      [g.id, g.title, g.notes, g.level, g.period, g.parentId, g.areaId, g.archived ? 1 : 0, g.createdAt, g.endDate],
     )
   }
 
@@ -145,16 +153,20 @@ class SqliteStorage implements Storage {
   async saveTask(t: Task) {
     const db = await this.db
     await db.execute(
-      `INSERT INTO tasks (id, title, notes, goal_id, area_id, date, time, remind_before, priority,
-         done, done_at, recurrence, subtasks, sort, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      `INSERT INTO tasks (id, title, notes, goal_id, area_id, date, time, priority,
+         done, done_at, recurrence, subtasks, sort, created_at, reminders, nag_minutes, email_reminder,
+         assignee_id, assignee_emailed_at, remind_assignee)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
        ON CONFLICT(id) DO UPDATE SET title = $2, notes = $3, goal_id = $4, area_id = $5, date = $6,
-         time = $7, remind_before = $8, priority = $9, done = $10, done_at = $11, recurrence = $12,
-         subtasks = $13, sort = $14`,
+         time = $7, priority = $8, done = $9, done_at = $10, recurrence = $11,
+         subtasks = $12, sort = $13, reminders = $15, nag_minutes = $16, email_reminder = $17,
+         assignee_id = $18, assignee_emailed_at = $19, remind_assignee = $20`,
       [
-        t.id, t.title, t.notes, t.goalId, t.areaId, t.date, t.time, t.remindBefore, t.priority,
+        t.id, t.title, t.notes, t.goalId, t.areaId, t.date, t.time, t.priority,
         t.done ? 1 : 0, t.doneAt, t.recurrence ? JSON.stringify(t.recurrence) : null,
-        JSON.stringify(t.subtasks), t.sort, t.createdAt,
+        JSON.stringify(t.subtasks), t.sort, t.createdAt, JSON.stringify(t.reminders), t.nagMinutes,
+        t.emailReminder === null ? null : t.emailReminder ? 1 : 0,
+        t.assigneeId, t.assigneeEmailedAt, t.remindAssignee ? 1 : 0,
       ],
     )
   }
@@ -205,7 +217,7 @@ class LocalStorage implements Storage {
       const raw = localStorage.getItem(LS_KEY)
       if (raw) {
         const parsed = JSON.parse(raw) as AppData
-        this.data = { ...emptyData(), ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } }
+        this.data = normalizeData({ ...emptyData(), ...parsed })
       }
     } catch {
       this.data = emptyData()

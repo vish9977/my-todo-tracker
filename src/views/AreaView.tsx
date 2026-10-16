@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { compareTasks } from '../lib/goals'
+import { goalRange, rankOf } from '../lib/periods'
 import { QuickAdd } from '../components/QuickAdd'
 import { Section, TaskList } from '../components/TaskItem'
 import { GoalCard } from '../components/GoalCard'
@@ -14,7 +15,11 @@ export function AreaView({ id }: { id: string }) {
   const tasks = data.tasks.filter((t) => t.areaId === id)
   const open = tasks.filter((t) => !t.done).sort(compareTasks)
   const done = tasks.filter((t) => t.done).sort((a, b) => (b.doneAt ?? '').localeCompare(a.doneAt ?? ''))
-  const goals = data.goals.filter((g) => g.areaId === id && !g.archived && g.level === 'month' && g.period >= today.slice(0, 7))
+  // Top-level goals for this area that are still running.
+  const goals = data.goals
+    .filter((g) => g.areaId === id && !g.archived && goalRange(g).end >= today)
+    .filter((g) => !g.parentId || data.goals.find((p) => p.id === g.parentId)?.areaId !== id)
+    .sort((a, b) => rankOf(b) - rankOf(a))
 
   return (
     <div>

@@ -1,6 +1,6 @@
 [package]
 name = "my-todo-tracker"
-version = "0.1.0"
+version = "0.2.0"
 description = "Offline goals and tasks tracker"
 authors = ["vikas"]
 edition = "2021"
@@ -20,7 +20,11 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
+lettre = "0.11"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }

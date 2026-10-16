@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { format } from 'date-fns'
 import type { AppData } from '../types'
 import { inDesktopApp } from './storage'
+import { normalizeData } from './normalize'
 
 export interface BackupFile {
   app: 'MyTodoTracker'
@@ -19,7 +20,7 @@ export function parseBackup(text: string): AppData {
   const file = JSON.parse(text) as BackupFile
   if (file.app !== 'MyTodoTracker' || !file.data || !Array.isArray(file.data.tasks) || !Array.isArray(file.data.goals))
     throw new Error('This is not a MyTodoTracker backup file.')
-  return file.data
+  return normalizeData(file.data)
 }
 
 const csvCell = (v: unknown) => {

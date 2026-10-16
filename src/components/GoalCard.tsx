@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import type { Goal } from '../types'
+import type { Goal, GoalLevel } from '../types'
 import { useStore } from '../store'
 import { useUI } from '../ui'
 import { goalProgress, compareTasks } from '../lib/goals'
-import { fromDay, prettyMonth, prettyWeek, weekPeriod } from '../lib/dates'
+import { CHILD_LEVEL, LEVEL_NAME, goalLabel, goalRange, periodFor, rankOf } from '../lib/periods'
 import { Icon } from './Icon'
 import { TaskList } from './TaskItem'
 import { QuickAdd } from './QuickAdd'
@@ -16,7 +16,7 @@ export function ProgressBar({ pct, color }: { pct: number; color?: string }) {
   )
 }
 
-/** A goal with its progress; expands to show its tasks (and, for a month goal, its week goals). */
+/** A goal with its progress; expands to show its smaller goals and its tasks. */
 export function GoalCard({ goal, defaultOpen = false }: { goal: Goal; defaultOpen?: boolean }) {
   const { data, today } = useStore()
   const { editGoal } = useUI()
@@ -27,7 +27,10 @@ export function GoalCard({ goal, defaultOpen = false }: { goal: Goal; defaultOpe
   const own = data.tasks.filter((t) => t.goalId === goal.id).sort(compareTasks)
   const visible = showDone ? own : own.filter((t) => !t.done)
   const doneCount = own.length - own.filter((t) => !t.done).length
-  const weekGoals = goal.level === 'month' ? data.goals.filter((g) => g.parentId === goal.id).sort((a, b) => a.period.localeCompare(b.period)) : []
+  const children = data.goals
+    .filter((g) => g.parentId === goal.id && !g.archived)
+    .sort((a, b) => goalRange(a).start.localeCompare(goalRange(b).start) || rankOf(b) - rankOf(a))
+  const childLevel = CHILD_LEVEL[goal.level]
 
   return (
     <div className={`rounded-lg border border-line bg-bg ${goal.archived ? 'opacity-60' : ''}`}>
@@ -45,7 +48,7 @@ export function GoalCard({ goal, defaultOpen = false }: { goal: Goal; defaultOpe
             </button>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted">
-            <span>{goal.level === 'month' ? prettyMonth(goal.period) : prettyWeek(goal.period)}</span>
+            <span>{LEVEL_NAME[goal.level]} · {goalLabel(goal)}</span>
             {area && (
               <span className="inline-flex items-center gap-1">
                 <span className="size-2 rounded-full" style={{ background: area.color }} />
@@ -61,9 +64,9 @@ export function GoalCard({ goal, defaultOpen = false }: { goal: Goal; defaultOpe
       {open && (
         <div className="border-t border-line px-3 pt-2 pb-3">
           {goal.notes && <p className="mb-2 px-2 text-sm whitespace-pre-wrap text-muted">{goal.notes}</p>}
-          {weekGoals.length > 0 && (
+          {children.length > 0 && (
             <div className="mb-3 space-y-2 pl-2">
-              {weekGoals.map((w) => <GoalCard key={w.id} goal={w} />)}
+              {children.map((c) => <GoalCard key={c.id} goal={c} />)}
             </div>
           )}
           <TaskList tasks={visible} />
@@ -76,12 +79,13 @@ export function GoalCard({ goal, defaultOpen = false }: { goal: Goal; defaultOpe
             <div className="flex-1">
               <QuickAdd defaults={{ goalId: goal.id, areaId: goal.areaId }} placeholder="Add a task to this goal, e.g. &quot;Write outline mon 10am&quot;" />
             </div>
-            {goal.level === 'month' && (
+            {goal.level !== 'week' && (
               <button
                 className="btn shrink-0 border border-line"
-                onClick={() => editGoal({ level: 'week', period: defaultWeek(goal.period, today, data.settings.weekStartsOn), parentId: goal.id, areaId: goal.areaId })}
+                title="Break this goal into a smaller goal"
+                onClick={() => editGoal({ level: childLevel, period: childPeriod(goal, childLevel, today, data.settings.weekStartsOn), parentId: goal.id, areaId: goal.areaId })}
               >
-                <Icon name="plus" size={14} /> Week goal
+                <Icon name="plus" size={14} /> {LEVEL_NAME[childLevel]} goal
               </button>
             )}
           </div>
@@ -91,7 +95,8 @@ export function GoalCard({ goal, defaultOpen = false }: { goal: Goal; defaultOpe
   )
 }
 
-/** This week if it falls in the goal's month, otherwise the month's first week. */
-function defaultWeek(month: string, today: string, weekStartsOn: 0 | 1) {
-  return weekPeriod(fromDay(today.startsWith(month) ? today : `${month}-01`), weekStartsOn)
+/** The child period that contains today if the goal is running, otherwise the goal's first one. */
+function childPeriod(goal: Goal, level: GoalLevel, today: string, weekStartsOn: 0 | 1) {
+  const { start, end } = goalRange(goal)
+  return periodFor(level, start <= today && today <= end ? today : start, weekStartsOn)
 }

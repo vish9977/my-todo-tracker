@@ -1,3 +1,5 @@
+mod backup;
+mod email;
 mod reminders;
 
 use tauri::{
@@ -56,8 +58,29 @@ fn migrations() -> Vec<Migration> {
             );
         "#,
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 2,
+        description: "goal end dates, multiple reminders, email reminders, assignees, hidden areas",
+        sql: MIGRATION_2,
+        kind: MigrationKind::Up,
     }]
 }
+
+/// Keeps every existing task's single reminder by turning it into the new reminders list.
+const MIGRATION_2: &str = r#"
+    ALTER TABLE goals ADD COLUMN end_date TEXT;
+    ALTER TABLE tasks ADD COLUMN reminders TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE tasks ADD COLUMN nag_minutes INTEGER;
+    ALTER TABLE tasks ADD COLUMN email_reminder INTEGER;
+    ALTER TABLE tasks ADD COLUMN assignee_id TEXT;
+    ALTER TABLE tasks ADD COLUMN assignee_emailed_at TEXT;
+    ALTER TABLE tasks ADD COLUMN remind_assignee INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE areas ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+    UPDATE tasks
+       SET reminders = json_array(json_object('id', 'r-' || id, 'kind', 'before', 'minutes', remind_before))
+     WHERE remind_before IS NOT NULL;
+"#;
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -91,7 +114,9 @@ pub fn run() {
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 Some(vec!["--minimized"]),
-            ));
+            ))
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
     }
 
     builder
@@ -105,10 +130,20 @@ pub fn run() {
         .manage(reminders::ReminderState::default())
         .invoke_handler(tauri::generate_handler![
             reminders::sync_reminders,
+            email::set_email_password,
+            email::has_email_password,
+            email::send_test_email,
+            email::send_email,
             write_text_file,
             read_text_file
         ])
         .setup(|app| {
+            // Runs before the window loads, so before the database is opened and upgraded.
+            if let Ok(dir) = app.path().app_config_dir() {
+                if let Err(e) = backup::backup_before_upgrade(&dir, &app.package_info().version.to_string()) {
+                    eprintln!("database backup failed: {e}");
+                }
+            }
             let open = MenuItem::with_id(app, "open", "Open MyTodoTracker", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
